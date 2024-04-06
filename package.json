@@ -1,0 +1,26 @@
+{
+  "name": "obsidian-migrate-tools",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "packageManager": "yarn@4.1.1",
+  "scripts": {
+    "test": "yarn build && node lib/cli.js -p \"src/__test__/res\"",
+    "build": "tsc",
+    "serve": "node lib/index.js",
+    "start": "yarn build && yarn serve"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@tsconfig/recommended": "^1.0.6",
+    "@types/node": "^20.12.5",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "globals": "^15.0.0",
+    "prettier": "3.2.5",
+    "typescript": "^5.4.4",
+    "typescript-eslint": "^7.5.0"
+  },
+  "dependencies": {
+    "utimes": "^5.2.1"
+  }
+}
