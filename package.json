@@ -21,6 +21,7 @@
     "typescript-eslint": "^7.5.0"
   },
   "dependencies": {
+    "sanitize-filename": "^1.6.3",
     "utimes": "^5.2.1"
   }
 }

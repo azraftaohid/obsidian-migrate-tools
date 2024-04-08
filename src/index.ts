@@ -1,48 +1,82 @@
+import { Dirent } from "fs";
 import fsp from "fs/promises";
-import path from "path";
+import path, { sep } from "path";
+import sanitize from "sanitize-filename";
 import { utimes } from "utimes";
 import { config } from "./config";
 
-async function updateBirthTimes(rootDir: string) {
-	const root = path.resolve(rootDir);
-	const contents = await fsp.readdir(root, { recursive: true, withFileTypes: true })
+async function updateBirthTime(file: Dirent, absPath: string, publicName: string) {
+	const content = await fsp.readFile(absPath).then(v => v.toString());
+	const props = extractProperties(content);
 
-	for (const file of contents) {
-		if (!file.isFile() || !file.name.endsWith(".md")) continue;
+	const timestamp = props && getProperty(props, "created");
+	if (!timestamp) return console.warn("Property 'created' not defined for the file:", publicName);
 
-		const absPath = path.resolve(file.path, file.name);
-		const publicName = absPath.slice(root.length + 1);
-		const content = await fsp.readFile(absPath).then(v => v.toString());
+	const timestampMs = Date.parse(timestamp.startsWith('"') ? timestamp.slice(1, -1) : timestamp);
+	if (Number.isNaN(timestampMs)) return console.warn("Can't parse create timestamp for the file:", publicName);
 
-		const props = /---(\n|.)*---/i.exec(content)?.[0];
-		if (!props) {
-			console.warn("Properties not defined for the file:", publicName);
-			continue;
-		}
-
-		const createdProp = /created: "?.+"?/i.exec(props)?.[0];
-		if (!createdProp) {
-			console.warn("Created property not defined for the file:", publicName);
-			continue;
-		}
-
-		const timestamp = createdProp.slice(9);
-		const timestampMs = Date.parse(timestamp.startsWith('"') ? timestamp.slice(1, -1) : timestamp);
-
-		if (Number.isNaN(timestampMs)) {
-			console.warn("Can't parse create timestamp for the file:", publicName);
-			continue;
-		}
-
-		try {
-			await utimes(absPath, { btime: timestampMs });
-		} catch (error) {
-			console.error("Unable to update birth time for file (" + publicName + "):", error);
-		}
+	try {
+		await utimes(absPath, { btime: timestampMs, mtime: timestampMs });
+	} catch (error) {
+		console.error("Unable to update birth time for file (" + publicName + "):", error);
 	}
 }
 
-updateBirthTimes(config.workingDir).then(() => {
+async function applyTitleAsName(file: Dirent, absPath: string, publicName: string) {
+	const content = await fsp.readFile(absPath).then(v => v.toString());
+	const props = extractProperties(content);
+
+	let title = props && getProperty(props, "title");
+	if (!title) return console.warn("Property 'title' not defined for file:", publicName);
+	
+	const name = sanitize(title, { replacement: " " });
+	try {
+		await fsp.rename(absPath, path.resolve(file.path, name + ".md"));
+	} catch (error) {
+		console.error(`Unable to rename file (${publicName}): `, error);
+	}
+}
+
+async function applyParentName(file: Dirent, absPath: string, publicName: string) {
+	const parentName = file.path.slice(file.path.lastIndexOf(sep) + 1);
+	const adjustedName = parentName.replace(/^\d* /i, "");
+	
+	try {
+		// folders containing multiple .md files may delete all but one
+		// which is fine because onenote_export tool exports single .md file per folder
+		await fsp.rename(absPath, path.resolve(file.path, adjustedName + ".md"));
+	} catch (error) {
+		console.error(`Unable to rename file (${publicName}): `, error);
+	}
+}
+
+async function forEachMarkdown(rootDir: string, op: (file: Dirent, absPath: string, publicName: string) => Promise<unknown>) {
+	const root = path.resolve(rootDir);
+	const contents = await fsp.readdir(root, { recursive: true, withFileTypes: true });
+	
+	for (const content of contents) {
+		if (!content.isFile() || !content.name.endsWith(".md")) continue;
+
+		const absPath = path.resolve(content.path, content.name);
+		const publicName = absPath.slice(root.length + 1);
+
+		await op(content, absPath, publicName);
+	}
+}
+
+function extractProperties(src: string) {
+	return /---[\s\S]*---/i.exec(src)?.[0];
+}
+
+function getProperty(props: string, name: string) {
+	const prop = new RegExp(`${name}: "?.+"?`, "i").exec(props)?.[0];
+	if (!prop) return;
+
+	const value = prop.slice(name.length + 2);
+	return value.startsWith('"') ? value.slice(1, -1) : value;
+}
+
+forEachMarkdown(config.workingDir, updateBirthTime).then(() => {
 	console.log("Completed.");
 }).catch(error => {
 	console.error("An error occurred:", error);
